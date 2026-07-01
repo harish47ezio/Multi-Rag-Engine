@@ -1,0 +1,70 @@
+schema_version: 1
+templates:
+  qwen3-embedding-8b:
+    metric: cosine
+    dimension: 4096
+    tokenizers:
+      hf-qwen3-8b:
+        kind: hf
+        repo: Qwen/Qwen3-Embedding-8B
+        status: stable
+        last_checked_at: '2026-06-30T10:53:16+00:00'
+        detail: null
+    providers:
+      ollama-local:
+        kind: ollama
+        model_id: qwen3-embedding:8b
+        default_base_url: http://localhost:11434
+        requires_api_key: false
+        status: stable
+        last_checked_at: '2026-06-29T18:44:42+00:00'
+        detail: null
+      huggingface:
+        kind: huggingface
+        model_id: qwen3-embedding-8b
+        default_base_url: https://router.huggingface.co/scaleway/v1/embeddings
+        requires_api_key: true
+        status: unreachable
+        last_checked_at: '2026-06-30T10:53:17+00:00'
+        detail: 'unreachable: huggingface @ https://router.huggingface.co/scaleway/v1/embeddings'
+    rerankers:
+      ollama-bge-rerank:
+        kind: ollama
+        model_id: linux6200/bge-reranker-v2-m3
+        default_base_url: http://localhost:11434
+        requires_api_key: false
+        score_strategy: embed
+        status: not_validated
+        last_checked_at: null
+        detail: null
+      hf-bge-rerank:
+        kind: hf
+        model_id: BAAI/bge-reranker-v2-m3
+        default_base_url: null
+        requires_api_key: false
+        score_strategy: null
+        status: stable
+        last_checked_at: '2026-06-28T17:26:01+00:00'
+        detail: null
+instances:
+  alpha-qwen:
+    template_key: qwen3-embedding-8b
+    tokenizer_id: hf-qwen3-8b
+    provider_id: ollama-local
+    metric_override: null
+    reranker_id: null
+    created_at: '2026-06-27T09:53:44+00:00'
+  beta-qwen-ollama:
+    template_key: qwen3-embedding-8b
+    tokenizer_id: hf-qwen3-8b
+    provider_id: ollama-local
+    metric_override: null
+    reranker_id: null
+    created_at: '2026-06-29T18:45:02+00:00'
+  gamma-qwen-huggingface:
+    template_key: qwen3-embedding-8b
+    tokenizer_id: hf-qwen3-8b
+    provider_id: huggingface
+    metric_override: null
+    reranker_id: null
+    created_at: '2026-06-29T18:56:45+00:00'

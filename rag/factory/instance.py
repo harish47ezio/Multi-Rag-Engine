@@ -22,10 +22,10 @@ one object and never have to reach into its parts.
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from rag.embedder.baseEmbedder import BaseEmbedder
-from rag.reranker.baseReranker import BaseReranker
+from rag.embedder.base_embedder import BaseEmbedder
+from rag.reranker.base_reranker import BaseReranker
 from rag.search.distance_metrics.base_distance_metric import BaseDistanceMetric
-from rag.tokenizer.baseTokenizer import BaseTokenizer
+from rag.tokenizer.base_tokenizer import BaseTokenizer
 
 
 @dataclass

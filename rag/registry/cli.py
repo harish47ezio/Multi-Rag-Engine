@@ -12,14 +12,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 
 from common.log_utils import setup_logging
 from rag.registry.loader import REGISTRY_PATH, load_registry, save_registry
 from rag.registry.validator import validate_full_template
-
-logger = logging.getLogger(__name__)
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
@@ -85,12 +82,13 @@ def cmd_save_instance(_args: argparse.Namespace) -> int:
     if picks is None:
         print("Cancelled.")
         return 0
-    tokenizer_id, provider_id, metric_override = picks
+    tokenizer_id, provider_id, metric_override, reranker_id = picks
     save_instance_flow(
         template_key=template_key,
         tokenizer_id=tokenizer_id,
         provider_id=provider_id,
         metric_override=metric_override,
+        reranker_id=reranker_id,
     )
     return 0
 

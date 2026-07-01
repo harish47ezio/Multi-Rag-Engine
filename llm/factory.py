@@ -1,6 +1,6 @@
-from providers.ollamaClient import OllamaClient
+from providers.ollama_client import OllamaClient
 from .base import BaseLLMAdapter
-from .ollamaAdapter import OllamaAdapter
+from .ollama_adapter import OllamaAdapter
 
 
 class LLMFactory:

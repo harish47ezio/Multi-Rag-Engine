@@ -1,7 +1,7 @@
 import logging
 
 from common.log_utils import preview
-from providers.ollamaClient import OllamaClient
+from providers.ollama_client import OllamaClient
 
 from .base import BaseLLMAdapter, LLMResponse
 

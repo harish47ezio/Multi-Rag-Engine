@@ -1,4 +1,4 @@
-# rag/search/lsh.py
+# rag/search/ann/lsh.py
 
 import logging
 import pickle
@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from rag.search.base_search import BaseSearcher
+from rag.search.base_vector_search import BaseVectorSearcher
 from rag.search.distance_metrics.base_distance_metric import (
     BaseDistanceMetric,
     MetricKind,
@@ -17,7 +17,7 @@ from rag.search._validation import validate_index_inputs
 logger = logging.getLogger(__name__)
 
 
-class LSHSearcher(BaseSearcher):
+class LSHSearcher(BaseVectorSearcher):
     """
     Approximate Nearest Neighbor search using LSH (Locality Sensitive Hashing).
     Uses random hyperplane projections — SimHash variant for cosine similarity.
@@ -72,7 +72,7 @@ class LSHSearcher(BaseSearcher):
         if len(vectors[0]) != self._dim:
             raise ValueError(f"Vector dim {len(vectors[0])} does not match initialised dim {self._dim}.")
 
-        self._chunk_indices = [int(i) for i in chunk_indices]
+        self._chunk_indices = self._normalize_chunk_indices(chunk_indices)
         matrix = self._metric.index_matrix(vectors)
         self._vectors = matrix
         self._tables = [{} for _ in range(self._n_tables)]
@@ -118,9 +118,15 @@ class LSHSearcher(BaseSearcher):
         scores = self._metric.search_matrix(candidate_matrix, q)
 
         top_k = min(top_k, len(candidate_list))
-        top_positions = np.argsort(scores)[::-1][:top_k]
-
         is_euclidean = self._metric.metric_kind() == MetricKind.EUCLIDEAN
+
+        if is_euclidean:
+            # search_matrix returns L2 distance (lower is better) — pick the
+            # smallest distances, i.e. ascending order.
+            top_positions = np.argsort(scores)[:top_k]
+        else:
+            # similarity metrics (cosine, dot): higher is better.
+            top_positions = np.argsort(scores)[::-1][:top_k]
 
         results = []
         for i in top_positions:
@@ -176,14 +182,9 @@ class LSHSearcher(BaseSearcher):
         with open(path, "rb") as f:
             state = pickle.load(f)
 
-        saved_kind = MetricKind(state["metric_kind"])
-        if saved_kind != self._metric.metric_kind():
-            raise ValueError(
-                f"Metric mismatch on load: saved={saved_kind}, "
-                f"current={self._metric.metric_kind()}."
-            )
+        self._verify_metric_on_load(state["metric_kind"])
 
-        self._chunk_indices = [int(i) for i in state["chunk_indices"]]
+        self._chunk_indices = self._normalize_chunk_indices(state["chunk_indices"])
         self._vectors = state["vectors"]
         self._tables = state["tables"]
         self._planes = state["planes"]

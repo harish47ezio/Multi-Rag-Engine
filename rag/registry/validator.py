@@ -28,10 +28,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import List, Optional, Union
 
-import requests
-
-from providers.ollamaClient import OllamaClient
-from providers.huggingFaceClient import HuggingFaceClient
+from providers.ollama_client import OllamaClient
+from providers.hugging_face_client import HuggingFaceClient
 from rag.registry.schema import (
     ProviderSpec,
     RerankerSpec,
@@ -39,7 +37,7 @@ from rag.registry.schema import (
     Template,
     TokenizerSpec,
 )
-from rag.tokenizer.hfTokenizer import HFTokenizer
+from rag.tokenizer.hf_tokenizer import HFTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -112,14 +110,7 @@ def validate_provider(spec: ProviderSpec) -> CheckResult:
                 detail=f"unreachable: ollama @ {client.base_url}",
             )
         try:
-            response = requests.get(
-                f"{client.base_url}/api/tags",
-                headers=client._headers(),
-                timeout=10,
-            )
-            response.raise_for_status()
-            tags = response.json().get("models", []) or []
-            served = {m.get("name") or m.get("model") for m in tags}
+            served = client.list_model_names()
             if spec.model_id not in served:
                 return CheckResult(
                     name=f"provider:{spec.id}",
@@ -145,7 +136,7 @@ def validate_provider(spec: ProviderSpec) -> CheckResult:
                 ok=False,
                 detail=f"{type(exc).__name__}: {exc}",
             )
-    if spec.kind == "huggingface":
+    if spec.kind == "hf":
         client = HuggingFaceClient(base_url=spec.default_base_url)
         if not client.is_available():
             return CheckResult(
@@ -186,14 +177,7 @@ def validate_reranker(spec: RerankerSpec) -> CheckResult:
                 detail=f"unreachable: ollama @ {client.base_url}",
             )
         try:
-            response = requests.get(
-                f"{client.base_url}/api/tags",
-                headers=client._headers(),
-                timeout=10,
-            )
-            response.raise_for_status()
-            tags = response.json().get("models", []) or []
-            served = {m.get("name") or m.get("model") for m in tags}
+            served = client.list_model_names()
             if spec.model_id not in served:
                 return CheckResult(
                     name=f"reranker:{spec.id}",

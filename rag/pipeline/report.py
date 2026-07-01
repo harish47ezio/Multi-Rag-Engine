@@ -1,9 +1,9 @@
 """
 Build a human-readable markdown report from a set of searcher runs.
 
-Each call writes one file at `result/{fingerprint}_{timestamp}.md` containing
-a timing summary followed by per-searcher result sections, with each chunk
-hydrated to its page range, source, and full text via the SQLite store.
+Each call writes one file at `result/{fingerprint}_{model_key}_{timestamp}.md`
+containing a timing summary followed by per-searcher result sections, with each
+chunk hydrated to its page range, source, and full text via the SQLite store.
 """
 
 from __future__ import annotations
@@ -13,13 +13,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from common.paths import RESULT_DIR
 from rag.pipeline.chunker import compute_page_raw_starts
 from rag.pipeline.models import Chunk
 from rag.pipeline.store import get_multi_chunks
 
 logger = logging.getLogger(__name__)
-
-RESULT_DIR = Path("result")
 
 # `run_search` returns (elapsed, results); results are (chunk_index, score).
 SearchHit = Tuple[int, float]

@@ -1,13 +1,9 @@
 import logging
 
-import truststore
-
-truststore.inject_into_ssl()
-
-from common.log_utils import setup_logging
+from common.bootstrap import bootstrap
 from rag.factory import EmbedderFactory
 
-setup_logging("INFO")
+bootstrap("INFO")
 logger = logging.getLogger(__name__)
 
 instance = EmbedderFactory.interactive_pick()

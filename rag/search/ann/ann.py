@@ -1,11 +1,10 @@
-import json
 import logging
 import time
 from typing import List, Tuple
 
 import numpy as np
 
-from rag.search.base_search import BaseSearcher
+from rag.search.base_vector_search import BaseVectorSearcher
 from rag.search.distance_metrics.base_distance_metric import (
     BaseDistanceMetric,
     MetricKind,
@@ -34,7 +33,7 @@ _SCORE_BY_KIND = {
 }
 
 
-class ANNSearcher(BaseSearcher):
+class ANNSearcher(BaseVectorSearcher):
     """
     Approximate Nearest Neighbor search using HNSW via hnswlib.
     Trades tiny accuracy loss for massive speed on large corpora.
@@ -86,7 +85,7 @@ class ANNSearcher(BaseSearcher):
             self._ef_search,
         )
 
-        self._chunk_indices = [int(i) for i in chunk_indices]
+        self._chunk_indices = self._normalize_chunk_indices(chunk_indices)
         self._dim = len(vectors[0])
 
         matrix = self._metric.index_matrix(vectors)
@@ -188,8 +187,7 @@ class ANNSearcher(BaseSearcher):
             "ef_search": self._ef_search,
             "metric_kind": self._metric.metric_kind().value,
         }
-        with open(f"{path}.meta.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False)
+        self._save_meta(path, meta)
         logger.info("ANN save done path=%s chunks=%d", path, len(self._chunk_indices))
 
     def load(self, path: str) -> None:
@@ -200,17 +198,11 @@ class ANNSearcher(BaseSearcher):
         import hnswlib
 
         logger.info("ANN load path=%s", path)
-        with open(f"{path}.meta.json", "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        meta = self._load_meta(path)
 
-        saved_kind = MetricKind(meta["metric_kind"])
-        if saved_kind != self._metric.metric_kind():
-            raise ValueError(
-                f"Metric mismatch on load: saved={saved_kind}, "
-                f"current={self._metric.metric_kind()}."
-            )
+        self._verify_metric_on_load(meta["metric_kind"])
 
-        self._chunk_indices = [int(i) for i in meta["chunk_indices"]]
+        self._chunk_indices = self._normalize_chunk_indices(meta["chunk_indices"])
         self._dim = meta["dim"]
         self._ef_construction = meta["ef_construction"]
         self._M = meta["M"]

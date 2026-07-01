@@ -11,7 +11,7 @@ import logging
 
 from tokenizers import Tokenizer
 
-from rag.tokenizer.baseTokenizer import BaseTokenizer
+from rag.tokenizer.base_tokenizer import BaseTokenizer
 
 logger = logging.getLogger(__name__)
 

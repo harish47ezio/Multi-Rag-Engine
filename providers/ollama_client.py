@@ -1,15 +1,15 @@
 import logging
-import os
 import time
 import requests
 from typing import Optional, List, Dict, Any
 
 from common.log_utils import count_chars, preview
+from providers.base_client import BaseHTTPClient
 
 logger = logging.getLogger(__name__)
 
 
-class OllamaClient:
+class OllamaClient(BaseHTTPClient):
     """
     HTTP client for Ollama (local) and Ollama Cloud.
 
@@ -30,33 +30,37 @@ class OllamaClient:
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
-        resolved_base_url = (
-            base_url
-            or os.environ.get("OLLAMA_HOST")
-            or "http://localhost:11434"
+        self.base_url, self.api_key = self._resolve_credentials(
+            base_url,
+            api_key,
+            base_url_env="OLLAMA_HOST",
+            api_key_env="OLLAMA_API_KEY",
+            default_base_url="http://localhost:11434",
         )
-        self.base_url = resolved_base_url.rstrip("/")
-        self.api_key = api_key or os.environ.get("OLLAMA_API_KEY")
         logger.info(
             "OllamaClient init base_url=%s auth=%s",
             self.base_url,
             "yes" if self.api_key else "no",
         )
 
-    def _headers(self) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        return headers
+    def list_model_names(self, timeout: int = 10) -> set:
+        """Return the set of model names served by this endpoint (from /api/tags).
+
+        Raises on any transport/HTTP error so callers can distinguish
+        "unreachable" from "reachable but model not served".
+        """
+        url = f"{self.base_url}/api/tags"
+        resp = requests.get(url, headers=self._headers(), timeout=timeout)
+        resp.raise_for_status()
+        tags = resp.json().get("models", []) or []
+        return {m.get("name") or m.get("model") for m in tags}
 
     def is_available(self) -> bool:
-        url = f"{self.base_url}/api/tags"
-        logger.info("is_available GET %s", url)
+        logger.info("is_available GET %s/api/tags", self.base_url)
         try:
-            r = requests.get(url, headers=self._headers(), timeout=5)
-            ok = r.status_code == 200
-            logger.info("is_available result=%s status=%s", ok, r.status_code)
-            return ok
+            self.list_model_names(timeout=5)
+            logger.info("is_available result=True")
+            return True
         except Exception as exc:
             logger.info("is_available unreachable err=%s", exc)
             return False
@@ -105,7 +109,7 @@ class OllamaClient:
 
         payload = {"model": model, "input": texts}
         start = time.perf_counter()
-        response = requests.post(url, json=payload, headers=self._headers(), timeout=240000)
+        response = requests.post(url, json=payload, headers=self._headers(), timeout=240)
         elapsed = time.perf_counter() - start
 
         if response.status_code != 200:

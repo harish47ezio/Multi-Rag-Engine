@@ -1,4 +1,4 @@
-# rag/search/base.py
+# rag/search/base_search.py
 
 from abc import ABC, abstractmethod
 from typing import List, Tuple

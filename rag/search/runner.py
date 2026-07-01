@@ -1,21 +1,21 @@
-import logging
 import time
 
 import numpy as np
-import truststore
 
-truststore.inject_into_ssl()
-
-from common.log_utils import setup_logging
+from common.paths import (
+    INDEX_ANNOY_FILENAME,
+    INDEX_HNSW_FILENAME,
+    INDEX_IVF_FILENAME,
+    INDEX_LSH_FILENAME,
+    VECTORS_FILENAME,
+    doc_storage_dir,
+)
 from rag.factory.instance import Instance
 from rag.search.ann.ann import ANNSearcher
 from rag.search.ann.annoy import AnnoySearcher
 from rag.search.ann.ivf import IVFSearcher
 from rag.search.ann.lsh import LSHSearcher
-from rag.search.knn.knn_searcher import KnnSearcher
-
-setup_logging("INFO")
-logger = logging.getLogger(__name__)
+from rag.search.knn.knn_searcher import KNNSearcher
 
 
 def embed_query(instance: Instance, query: str):
@@ -42,27 +42,27 @@ def run_search(
     every searcher comes from the Instance, never hard-coded here.
     """
     dim = len(query_vector)
-    doc_dir = f"storage/{fingerprint}/{instance.model_key}"
+    doc_dir = doc_storage_dir(fingerprint, instance.model_key)
     metric = instance.metric
 
     if name == "ANNSearcher":
         searcher = ANNSearcher(metric)
-        searcher.load(f"{doc_dir}/index_hnsw.bin")
+        searcher.load(str(doc_dir / INDEX_HNSW_FILENAME))
     elif name == "IVFSearcher":
         searcher = IVFSearcher(metric)
-        searcher.load(f"{doc_dir}/index_ivf.faiss")
+        searcher.load(str(doc_dir / INDEX_IVF_FILENAME))
     elif name == "LSHSearcher":
         searcher = LSHSearcher(metric, dim)
-        searcher.load(f"{doc_dir}/index_lsh.pkl")
+        searcher.load(str(doc_dir / INDEX_LSH_FILENAME))
     elif name == "AnnoySearcher":
         searcher = AnnoySearcher(metric, dim)
-        searcher.load(f"{doc_dir}/index_annoy.ann")
-    elif name == "KnnSearcher":
+        searcher.load(str(doc_dir / INDEX_ANNOY_FILENAME))
+    elif name == "KNNSearcher":
         # KNN is not persisted by the indexer — rebuild from cached vectors.
         # chunk_index aligns with vectors-array position because the indexer
         # embeds chunks in chunk_index order.
-        searcher = KnnSearcher(metric)
-        vectors = np.load(f"{doc_dir}/vectors.npy").tolist()
+        searcher = KNNSearcher(metric)
+        vectors = np.load(doc_dir / VECTORS_FILENAME).tolist()
         chunk_indices = list(range(len(vectors)))
         searcher.index(vectors, chunk_indices)
     else:
@@ -72,15 +72,4 @@ def run_search(
     results = searcher.search(query_vector, query, k)
     search_elapsed = time.perf_counter() - search_start
 
-    # logger.info("run_search name=%s elapsed=%.4fs hits=%d", name, search_elapsed, len(results))
-    # for rank, (chunk_index, score) in enumerate(results, start=1):
-    #     logger.info(
-    #         "run_search name=%s rank=%d score=%.4f fp=%s model=%s chunk_index=%d",
-    #         name,
-    #         rank,
-    #         score,
-    #         fingerprint,
-    #         instance.model_key,
-    #         chunk_index,
-    #     )
     return search_elapsed, results

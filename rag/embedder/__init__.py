@@ -1,4 +1,4 @@
-from rag.embedder.baseEmbedder import BaseEmbedder
-from rag.embedder.ollamaAdapter import OllamaAdapter
+from rag.embedder.base_embedder import BaseEmbedder
+from rag.embedder.ollama_adapter import OllamaAdapter
 
 __all__ = ["BaseEmbedder", "OllamaAdapter"]

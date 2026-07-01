@@ -25,8 +25,8 @@ import logging
 import re
 from typing import List
 
-from providers.ollamaClient import OllamaClient
-from rag.reranker.baseReranker import BaseReranker
+from providers.ollama_client import OllamaClient
+from rag.reranker.base_reranker import BaseReranker
 
 logger = logging.getLogger(__name__)
 

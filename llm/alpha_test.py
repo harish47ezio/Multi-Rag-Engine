@@ -1,17 +1,10 @@
 import logging
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
-import truststore
-
-truststore.inject_into_ssl()
-
-from common.log_utils import preview, setup_logging
+from common.bootstrap import bootstrap
+from common.log_utils import preview
 from llm import LLMFactory
 
-setup_logging("INFO")
+bootstrap("INFO")
 logger = logging.getLogger(__name__)
 
 llm = LLMFactory.create({

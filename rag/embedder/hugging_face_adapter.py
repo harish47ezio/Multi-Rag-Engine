@@ -1,8 +1,8 @@
 import logging
 from typing import List, Optional
 
-from providers.huggingFaceClient import HuggingFaceClient
-from rag.embedder.baseEmbedder import BaseEmbedder
+from providers.hugging_face_client import HuggingFaceClient
+from rag.embedder.base_embedder import BaseEmbedder
 from rag.search.distance_metrics.base_distance_metric import MetricKind
 
 logger = logging.getLogger(__name__)

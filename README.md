@@ -81,7 +81,7 @@ Four orthogonal layers, each defined by an abstract contract:
 ├────────────────────────────────────────────────────────────────┤
 │  Searcher            BaseSearcher          index() / search()  │
 │  ─ BM25Searcher        (lexical, rank_bm25)                    │
-│  ─ KnnSearcher         (exact, numpy)                          │
+│  ─ KNNSearcher         (exact, numpy)                          │
 │  ─ ANNSearcher         (HNSW, hnswlib)                         │
 │  ─ AnnoySearcher       (random projection forest)              │
 │  ─ IVFSearcher         (inverted file, FAISS)                  │
@@ -104,9 +104,9 @@ Same document store, same harness, same I/O — different brain.
 
 ### Why the layers are split this way
 
-- **Provider client vs role adapter.** `providers/ollamaClient.py` holds connection state
-  (base URL, API key, headers). The role adapters (`llm/ollamaAdapter.py`,
-  `rag/embedder/ollamaAdapter.py`) bind a *model* to that client for a specific role.
+- **Provider client vs role adapter.** `providers/ollama_client.py` holds connection state
+  (base URL, API key, headers). The role adapters (`llm/ollama_adapter.py`,
+  `rag/embedder/ollama_adapter.py`) bind a *model* to that client for a specific role.
   One client, many roles, zero duplication.
 - **Embedder vs tokenizer.** The transport (provider → model → vector) is `BaseEmbedder`;
   token counting (chunker concern) is `BaseTokenizer`. They live in separate packages
@@ -132,7 +132,7 @@ Same document store, same harness, same I/O — different brain.
 | Searcher          | Backend          | Best for                                | Cosine | Dot | Euclid |
 | ----------------- | ---------------- | --------------------------------------- | :----: | :-: | :----: |
 | `BM25Searcher`    | rank_bm25        | exact terms, IDs, names                 |   —    |  —  |   —    |
-| `KnnSearcher`     | numpy            | small corpora, ground-truth recall      |   yes  |  yes|   yes  |
+| `KNNSearcher`     | numpy            | small corpora, ground-truth recall      |   yes  |  yes|   yes  |
 | `ANNSearcher`     | hnswlib (HNSW)   | large corpora, high recall, in-memory   |   yes  |  yes|   yes  |
 | `AnnoySearcher`   | Annoy            | static corpus, low RAM, immutable index |   yes  |  yes|   yes  |
 | `IVFSearcher`     | FAISS IVF        | very large corpora, tunable recall      |   yes  |  yes|   yes  |
@@ -251,18 +251,18 @@ Multi RAG Engine/
 │   ├── chunks.db                 # SQLite chunk store
 │   └── <fingerprint>/<model_key>/  # vectors.npy + index_{hnsw,annoy,ivf,lsh}
 ├── providers/
-│   └── ollamaClient.py           # HTTP client (local + cloud), no model bound
+│   └── ollama_client.py          # HTTP client (local + cloud), no model bound
 ├── llm/                          # Completion role
 │   ├── base.py                   # BaseLLMAdapter, LLMResponse
 │   ├── factory.py                # LLMFactory (provider registry)
-│   └── ollamaAdapter.py
+│   └── ollama_adapter.py
 └── rag/
     ├── embedder/                 # Embedding role — transport (text → vector)
-    │   ├── baseEmbedder.py       # BaseEmbedder contract (embed, dimension, recommended_metric)
-    │   └── ollamaAdapter.py
+    │   ├── base_embedder.py      # BaseEmbedder contract (embed, dimension, recommended_metric)
+    │   └── ollama_adapter.py
     ├── tokenizer/                # Token counting — orthogonal to provider
-    │   ├── baseTokenizer.py      # BaseTokenizer contract (count_tokens)
-    │   └── hfTokenizer.py        # HuggingFace tokenizers backend
+    │   ├── base_tokenizer.py     # BaseTokenizer contract (count_tokens)
+    │   └── hf_tokenizer.py       # HuggingFace tokenizers backend
     ├── factory/                  # Compose tokenizer + embedder + metric into Instance
     │   ├── factory.py            # EmbedderFactory (from_template / from_saved_instance / interactive_pick)
     │   └── instance.py           # Locked runtime selection (model, tokenizer, provider, metric)
@@ -445,7 +445,7 @@ fits together.
 | --------------------------------- | ------------- |
 | `llm/alpha_test.py`               | LLM harness — Ollama Cloud completion (needs `OLLAMA_API_KEY`). |
 | `rag/embedder/alpha_test.py`      | Embedder harness — embed a sentence, print the dimension. |
-| `rag/search/alpha_test.py`        | Per-searcher loaders + `run_search()` helper used by the pipeline. |
+| `rag/search/runner.py`            | Per-searcher loaders + `run_search()` helper used by the pipeline. |
 | `rag/pipeline/alpha_test.py`      | **Start here.** Full end-to-end: parse PDF → chunk → embed → build all indices → run HNSW / IVF / LSH / Annoy / KNN for one query → write `result/<fingerprint>_<timestamp>.md`. |
 
 `rag/pipeline/alpha_test.py` is the most representative — it touches the parser,

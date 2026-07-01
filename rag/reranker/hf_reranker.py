@@ -15,7 +15,7 @@ expose a `.predict(pairs)` method that returns a relevance score per
 import logging
 from typing import List
 
-from rag.reranker.baseReranker import BaseReranker
+from rag.reranker.base_reranker import BaseReranker
 
 logger = logging.getLogger(__name__)
 

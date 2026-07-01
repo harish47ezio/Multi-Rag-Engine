@@ -1,8 +1,8 @@
 import logging
 from typing import List, Optional
 
-from providers.ollamaClient import OllamaClient
-from rag.embedder.baseEmbedder import BaseEmbedder
+from providers.ollama_client import OllamaClient
+from rag.embedder.base_embedder import BaseEmbedder
 from rag.search.distance_metrics.base_distance_metric import MetricKind
 
 logger = logging.getLogger(__name__)

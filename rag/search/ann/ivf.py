@@ -1,11 +1,10 @@
-import json
 import logging
 import time
 from typing import List, Tuple
 
 import faiss
 
-from rag.search.base_search import BaseSearcher
+from rag.search.base_vector_search import BaseVectorSearcher
 from rag.search.distance_metrics.base_distance_metric import (
     BaseDistanceMetric,
     MetricKind,
@@ -39,7 +38,7 @@ _SCORE_BY_KIND = {
 }
 
 
-class IVFSearcher(BaseSearcher):
+class IVFSearcher(BaseVectorSearcher):
     """
     Approximate Nearest Neighbor search using IVF (Inverted File Index) via FAISS.
     Partitions vector space into clusters at index time.
@@ -100,7 +99,7 @@ class IVFSearcher(BaseSearcher):
                 len(chunk_indices),
             )
 
-        self._chunk_indices = [int(i) for i in chunk_indices]
+        self._chunk_indices = self._normalize_chunk_indices(chunk_indices)
         self._dim = len(vectors[0])
 
         # Let metric handle normalization decision
@@ -206,8 +205,7 @@ class IVFSearcher(BaseSearcher):
             "n_probe": self._n_probe,
             "metric_kind": self._metric.metric_kind().value,
         }
-        with open(f"{path}.meta.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False)
+        self._save_meta(path, meta)
         logger.info("IVF save done path=%s chunks=%d", path, len(self._chunk_indices))
 
     def load(self, path: str) -> None:
@@ -216,17 +214,11 @@ class IVFSearcher(BaseSearcher):
         Caller must construct IVFSearcher with the same metric used at save.
         """
         logger.info("IVF load path=%s", path)
-        with open(f"{path}.meta.json", "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        meta = self._load_meta(path)
 
-        saved_kind = MetricKind(meta["metric_kind"])
-        if saved_kind != self._metric.metric_kind():
-            raise ValueError(
-                f"Metric mismatch on load: saved={saved_kind}, "
-                f"current={self._metric.metric_kind()}."
-            )
+        self._verify_metric_on_load(meta["metric_kind"])
 
-        self._chunk_indices = [int(i) for i in meta["chunk_indices"]]
+        self._chunk_indices = self._normalize_chunk_indices(meta["chunk_indices"])
         self._dim = meta["dim"]
         self._n_clusters = meta["n_clusters"]
         self._n_probe = meta["n_probe"]

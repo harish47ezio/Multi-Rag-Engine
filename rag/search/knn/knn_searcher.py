@@ -1,22 +1,20 @@
-import json
 import logging
 import time
 from typing import List, Optional, Tuple
 
 import numpy as np
 
-from rag.search.base_search import BaseSearcher
+from rag.search.base_vector_search import BaseVectorSearcher
 from rag.search._validation import validate_index_inputs
 from rag.search.distance_metrics.base_distance_metric import (
     BaseDistanceMetric,
-    MetricKind,
     ScoreType,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class KnnSearcher(BaseSearcher):
+class KNNSearcher(BaseVectorSearcher):
     """
     Generic k-nearest-neighbour searcher.
     The distance metric is injected at construction time so that the
@@ -39,7 +37,7 @@ class KnnSearcher(BaseSearcher):
             len(vectors[0]),
         )
 
-        self._chunk_indices = [int(i) for i in chunk_indices]
+        self._chunk_indices = self._normalize_chunk_indices(chunk_indices)
         self._matrix = self._metric.index_matrix(vectors)
         logger.info(
             "KNN index done count=%d elapsed=%.2fs",
@@ -105,23 +103,16 @@ class KnnSearcher(BaseSearcher):
             "chunk_indices": self._chunk_indices,
             "metric_kind": self._metric.metric_kind().value,
         }
-        with open(f"{path}.meta.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False)
+        self._save_meta(path, meta)
         logger.info("KNN save done path=%s chunks=%d", path, len(self._chunk_indices))
 
     def load(self, path: str) -> None:
         logger.info("KNN load path=%s", path)
-        with open(f"{path}.meta.json", "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        meta = self._load_meta(path)
 
-        saved_kind = MetricKind(meta["metric_kind"])
-        if saved_kind != self._metric.metric_kind():
-            raise ValueError(
-                f"Metric mismatch on load: saved={saved_kind}, "
-                f"current={self._metric.metric_kind()}."
-            )
+        self._verify_metric_on_load(meta["metric_kind"])
 
-        self._chunk_indices = [int(i) for i in meta["chunk_indices"]]
+        self._chunk_indices = self._normalize_chunk_indices(meta["chunk_indices"])
         # np.save appends .npy if absent; np.load tolerates both forms.
         self._matrix = np.load(path if path.endswith(".npy") else f"{path}.npy",
                                allow_pickle=False)

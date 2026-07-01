@@ -1,3 +1,3 @@
-from .ollamaClient import OllamaClient
+from .ollama_client import OllamaClient
 
 __all__ = ["OllamaClient"]

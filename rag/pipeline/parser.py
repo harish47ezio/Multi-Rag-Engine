@@ -5,6 +5,7 @@ from pathlib import Path
 
 import opendataloader_pdf
 
+from common.paths import OUTPUT_DIR, parsed_markdown_path
 from fingerprint.hash import hash_file
 
 logger = logging.getLogger(__name__)
@@ -12,8 +13,10 @@ logger = logging.getLogger(__name__)
 
 def parse(file_path: str) -> str:
     """
-    Parse a PDF, TXT, or MD file into a list of Pages.
-    Each Page carries its text, page number, and source path.
+    Parse a PDF, TXT, or MD file into page-marked markdown at
+    `output/<fingerprint>.md` and return the document's SHA-256 fingerprint.
+    Re-parsing the same file is a cache hit (the fingerprint is returned
+    without re-conversion).
     """
     logger.info("parse start file=%s", file_path)
     path = Path(file_path)
@@ -42,7 +45,7 @@ def _parse_pdf(path: Path) -> str:
         hash_elapsed,
     )
 
-    output_file = Path(f"output/{fingerprint}.md")
+    output_file = parsed_markdown_path(fingerprint)
     if output_file.exists():
         logger.info(
             "parse pdf cache hit fingerprint=%s output=%s",
@@ -51,16 +54,15 @@ def _parse_pdf(path: Path) -> str:
         )
         return fingerprint
 
-    logger.info("parse pdf converting file=%s output_dir=output/", path)
+    logger.info("parse pdf converting file=%s output_dir=%s", path, OUTPUT_DIR)
     convert_start = time.perf_counter()
     opendataloader_pdf.convert(
         input_path=[str(path)],
         markdown_page_separator="\n\n<!-- page: %page-number% -->\n\n",
-        output_dir="output/",
+        output_dir=f"{OUTPUT_DIR}/",
         format="markdown"
-   
     )
-    default_output = Path("output") / f"{path.stem}.md"
+    default_output = OUTPUT_DIR / f"{path.stem}.md"
     default_output.rename(output_file)
     sanitize_markdown(output_file)
     logger.info(
@@ -83,7 +85,7 @@ def _parse_text(path: Path) -> str:
         hash_elapsed,
     )
 
-    output_file = Path(f"output/{fingerprint}.md")
+    output_file = parsed_markdown_path(fingerprint)
     if output_file.exists():
         logger.info(
             "parse text cache hit fingerprint=%s output=%s",

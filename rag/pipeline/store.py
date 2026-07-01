@@ -15,14 +15,12 @@ queries by `(fingerprint, chunk_index)` alone.
 
 import logging
 import sqlite3
-from pathlib import Path
 from typing import List, Optional
 
+from common.paths import CHUNK_DB_PATH as DB_PATH
 from rag.pipeline.models import Chunk
 
 logger = logging.getLogger(__name__)
-
-DB_PATH = Path("storage/chunks.db")
 
 
 def _connect() -> sqlite3.Connection:

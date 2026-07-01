@@ -19,7 +19,6 @@ Pipeline (per chunking_strategy.md):
 tokenizer (the strategy doc requires the embedder's own tokenizer).
 """
 
-from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import bisect
@@ -27,6 +26,7 @@ import logging
 import re
 import time
 
+from common.paths import parsed_markdown_path
 from rag.pipeline.models import Chunk, ChunkConfig
 from rag.pipeline.store import get_all_chunks, save_chunks
 
@@ -96,7 +96,7 @@ def chunk(
         config.overlap_pct,
     )
 
-    source_path = Path("output") / f"{fingerprint}.md"
+    source_path = parsed_markdown_path(fingerprint)
     if not source_path.exists():
         raise FileNotFoundError(f"Parsed document not found: {source_path}")
 

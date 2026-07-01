@@ -26,4 +26,3 @@ class Chunk:
 class ChunkConfig:
     chunk_tokens: int = 512
     overlap_pct: float = 0.15
-    min_chunk_tokens: int = 64

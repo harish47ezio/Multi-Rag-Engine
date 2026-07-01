@@ -1,38 +1,32 @@
 import logging
-import os
 import time
 import requests
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from common.log_utils import count_chars, preview
+from providers.base_client import BaseHTTPClient
 
 logger = logging.getLogger(__name__)
 
 
-class HuggingFaceClient:
+class HuggingFaceClient(BaseHTTPClient):
     def __init__(
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
     ):
-        resolved_base_url = (
-            base_url
-            or os.environ.get("HUGGINGFACE_HOST")
-            or "https://router.huggingface.co/scaleway/v1/embeddings"
+        self.base_url, self.api_key = self._resolve_credentials(
+            base_url,
+            api_key,
+            base_url_env="HUGGINGFACE_HOST",
+            api_key_env="HUGGING_FACE_API_KEY",
+            default_base_url="https://router.huggingface.co/scaleway/v1/embeddings",
         )
-        self.base_url = resolved_base_url.rstrip("/")
-        self.api_key = api_key or os.environ.get("HUGGING_FACE_API_KEY")
         logger.info(
             "HuggingFaceClient init base_url=%s auth=%s",
             self.base_url,
             "yes" if self.api_key else "no",
         )
-
-    def _headers(self) -> Dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        return headers
 
     def is_available(self) -> bool:
         try:
@@ -56,15 +50,11 @@ class HuggingFaceClient:
             preview(texts[0]),
         )
 
-        payload = {"input": texts,"model": model}
+        payload = {"input": texts, "model": model}
         start = time.perf_counter()
-        logger.info("auth headers=%s", self._headers())
-        logger.info("payload=%s", payload)
-        logger.info("url=%s", self.base_url)
 
-        response = requests.post(self.base_url, headers=self._headers(), json=payload, timeout=240000)
+        response = requests.post(self.base_url, headers=self._headers(), json=payload, timeout=240)
         elapsed = time.perf_counter() - start
-        logger.info("response=%s", response.json())   
 
         if response.status_code != 200:
             logger.info(

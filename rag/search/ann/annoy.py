@@ -1,4 +1,3 @@
-import json
 import logging
 import time
 from typing import List, Tuple
@@ -6,7 +5,7 @@ from typing import List, Tuple
 import numpy as np
 from annoy import AnnoyIndex
 
-from rag.search.base_search import BaseSearcher
+from rag.search.base_vector_search import BaseVectorSearcher
 from rag.search.distance_metrics.base_distance_metric import (
     BaseDistanceMetric,
     MetricKind,
@@ -36,7 +35,7 @@ _SCORE_BY_KIND = {
 }
 
 
-class AnnoySearcher(BaseSearcher):
+class AnnoySearcher(BaseVectorSearcher):
     """
     Approximate Nearest Neighbor search using Annoy (Spotify).
     Builds a forest of random projection trees at index time.
@@ -92,7 +91,7 @@ class AnnoySearcher(BaseSearcher):
             self._annoy_metric,
         )
 
-        self._chunk_indices = [int(i) for i in chunk_indices]
+        self._chunk_indices = self._normalize_chunk_indices(chunk_indices)
         matrix = self._metric.index_matrix(vectors)  # normalize or raw per metric
 
         self._index = AnnoyIndex(self._dim, self._annoy_metric)
@@ -177,8 +176,7 @@ class AnnoySearcher(BaseSearcher):
             "n_trees": self._n_trees,
             "metric_kind": self._metric.metric_kind().value,
         }
-        with open(f"{path}.meta.json", "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False)
+        self._save_meta(path, meta)
         logger.info("Annoy save done path=%s chunks=%d", path, len(self._chunk_indices))
 
     def load(self, path: str) -> None:
@@ -187,21 +185,15 @@ class AnnoySearcher(BaseSearcher):
         and metric, then load() populates it.
         """
         logger.info("Annoy load path=%s", path)
-        with open(f"{path}.meta.json", "r", encoding="utf-8") as f:
-            meta = json.load(f)
+        meta = self._load_meta(path)
 
-        saved_kind = MetricKind(meta["metric_kind"])
-        if saved_kind != self._metric.metric_kind():
-            raise ValueError(
-                f"Metric mismatch on load: saved={saved_kind}, "
-                f"current={self._metric.metric_kind()}."
-            )
+        self._verify_metric_on_load(meta["metric_kind"])
         if meta["dim"] != self._dim:
             raise ValueError(
                 f"Dim mismatch on load: saved={meta['dim']}, current={self._dim}."
             )
 
-        self._chunk_indices = [int(i) for i in meta["chunk_indices"]]
+        self._chunk_indices = self._normalize_chunk_indices(meta["chunk_indices"])
         self._n_trees = meta["n_trees"]
 
         self._index = AnnoyIndex(self._dim, self._annoy_metric)

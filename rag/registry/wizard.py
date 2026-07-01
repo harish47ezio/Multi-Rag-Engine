@@ -22,7 +22,6 @@ from rag.registry.schema import (
     ProviderSpec,
     RerankerSpec,
     SavedInstance,
-    Status,
     Template,
     TokenizerSpec,
 )

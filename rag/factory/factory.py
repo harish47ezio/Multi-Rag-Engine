@@ -29,21 +29,21 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from providers.ollamaClient import OllamaClient
-from providers.huggingFaceClient import HuggingFaceClient
-from rag.embedder.baseEmbedder import BaseEmbedder
-from rag.embedder.huggingFaceAdapter import HuggingFaceAdapter
-from rag.embedder.ollamaAdapter import OllamaAdapter
+from providers.ollama_client import OllamaClient
+from providers.hugging_face_client import HuggingFaceClient
+from rag.embedder.base_embedder import BaseEmbedder
+from rag.embedder.hugging_face_adapter import HuggingFaceAdapter
+from rag.embedder.ollama_adapter import OllamaAdapter
 from rag.factory.instance import Instance
 from rag.registry.loader import REGISTRY_PATH, load_registry, save_registry
 from rag.registry.schema import ProviderSpec, RerankerSpec, TokenizerSpec
 from rag.registry.validator import validate_template_picks
-from rag.reranker.baseReranker import BaseReranker
-from rag.reranker.ollamaReranker import OllamaReranker
+from rag.reranker.base_reranker import BaseReranker
+from rag.reranker.ollama_reranker import OllamaReranker
 from rag.search.distance_metrics import build_metric
 from rag.search.distance_metrics.base_distance_metric import MetricKind
-from rag.tokenizer.baseTokenizer import BaseTokenizer
-from rag.tokenizer.hfTokenizer import HFTokenizer
+from rag.tokenizer.base_tokenizer import BaseTokenizer
+from rag.tokenizer.hf_tokenizer import HFTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,7 @@ def _build_embedder(
             model=provider_spec.model_id,
             metric_kind=metric_kind,
         )
-    if provider_spec.kind == "huggingface":
+    if provider_spec.kind == "hf":
         client = HuggingFaceClient(
             base_url=provider_spec.default_base_url,
             api_key=api_key,
@@ -244,7 +244,7 @@ def _build_embedder(
         )
     raise ValueError(
         f"Unknown provider kind '{provider_spec.kind}'. "
-        f"Supported kinds today: ['ollama', 'huggingface']."
+        f"Supported kinds today: ['ollama', 'hf']."
     )
 
 
@@ -265,7 +265,7 @@ def _build_reranker(
         )
     if reranker_spec.kind == "hf":
         # Deferred import: keeps torch off the path for Ollama-only setups.
-        from rag.reranker.hfReranker import HFReranker
+        from rag.reranker.hf_reranker import HFReranker
 
         return HFReranker(repo=reranker_spec.model_id)
     raise ValueError(

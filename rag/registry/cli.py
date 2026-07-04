@@ -3,8 +3,10 @@ CLI subcommands for the registry.
 
 Usage:
     python -m rag.registry list
-    python -m rag.registry register-template
-    python -m rag.registry save-instance
+    python -m rag.registry register-template     # embedding template
+    python -m rag.registry register-reranker
+    python -m rag.registry register-llm
+    python -m rag.registry save-mother
     python -m rag.registry validate <template_key>
     python -m rag.registry refresh
 """
@@ -16,15 +18,20 @@ import sys
 
 from common.log_utils import setup_logging
 from rag.registry.loader import REGISTRY_PATH, load_registry, save_registry
-from rag.registry.validator import validate_full_template
+from rag.registry.validator import (
+    validate_full_embedding_template,
+    validate_full_llm_template,
+    validate_full_reranker_template,
+)
 
 
 def cmd_list(_args: argparse.Namespace) -> int:
     registry = load_registry()
     print(f"Registry: {REGISTRY_PATH}")
     print(f"  schema_version: {registry.schema_version}")
-    print(f"  templates: {len(registry.templates)}")
-    for tk, t in registry.templates.items():
+
+    print(f"\n  embedding_templates: {len(registry.embedding_templates)}")
+    for tk, t in registry.embedding_templates.items():
         print(
             f"    - {tk}   metric={t.metric}  dim={t.dimension}  "
             f"tokenizers={len(t.tokenizers)}  providers={len(t.providers)}"
@@ -36,70 +43,104 @@ def cmd_list(_args: argparse.Namespace) -> int:
                 f"        provider  {pid}: {s.status.value}    "
                 f"model_id={s.model_id}  base_url={s.default_base_url}"
             )
-    print(f"  instances: {len(registry.instances)}")
-    for name, i in registry.instances.items():
+
+    print(f"\n  reranker_templates: {len(registry.reranker_templates)}")
+    for tk, t in registry.reranker_templates.items():
+        print(f"    - {tk}   providers={len(t.providers)}")
+        for pid, s in t.providers.items():
+            print(
+                f"        provider  {pid}: {s.status.value}    kind={s.kind}  "
+                f"model_id={s.model_id}  strategy={s.score_strategy or '-'}"
+            )
+
+    print(f"\n  llm_templates: {len(registry.llm_templates)}")
+    for tk, t in registry.llm_templates.items():
+        print(f"    - {tk}   providers={len(t.providers)}")
+        for pid, s in t.providers.items():
+            print(
+                f"        provider  {pid}: {s.status.value}    "
+                f"model_id={s.model_id}  base_url={s.default_base_url}"
+            )
+
+    print(f"\n  search_strategies: {registry.search_strategies}")
+
+    print(f"\n  embedding_instances: {len(registry.embedding_instances)}")
+    for name, i in registry.embedding_instances.items():
         override = f"  metric_override={i.metric_override}" if i.metric_override else ""
         print(
             f"    - {name}   template={i.template_key}  "
             f"tokenizer={i.tokenizer_id}  provider={i.provider_id}{override}"
         )
+
+    print(f"  reranker_instances: {len(registry.reranker_instances)}")
+    for name, i in registry.reranker_instances.items():
+        print(f"    - {name}   template={i.template_key}  provider={i.provider_id}")
+
+    print(f"  llm_instances: {len(registry.llm_instances)}")
+    for name, i in registry.llm_instances.items():
+        print(f"    - {name}   template={i.template_key}  provider={i.provider_id}")
+
+    print(f"  search_instances: {len(registry.search_instances)}")
+    for name, i in registry.search_instances.items():
+        print(f"    - {name}   strategies={i.strategies}")
+
+    print(f"\n  mother_instances: {len(registry.mother_instances)}")
+    for name, m in registry.mother_instances.items():
+        print(
+            f"    - {name}   embedding={m.embedding_instance}  search={m.search_instance}"
+            f"  reranker={m.reranker_instance or '-'}  llm={m.llm_instance or '-'}"
+        )
     return 0
 
 
 def cmd_register_template(_args: argparse.Namespace) -> int:
-    from rag.registry.wizard import register_template_flow
+    from rag.registry.wizard import register_embedding_template_flow
 
-    register_template_flow()
+    register_embedding_template_flow()
     return 0
 
 
-def cmd_save_instance(_args: argparse.Namespace) -> int:
-    """Interactive: pick template + tokenizer + provider, optional metric override, save as named instance."""
-    from rag.registry.picker import _pick_within_template
-    from rag.registry.wizard import save_instance_flow
+def cmd_register_reranker(_args: argparse.Namespace) -> int:
+    from rag.registry.wizard import register_reranker_template_flow
 
-    registry = load_registry()
-    if not registry.templates:
-        print("No templates in registry. Run `register-template` first.")
-        return 1
+    register_reranker_template_flow()
+    return 0
 
-    print("Available templates:")
-    keys = list(registry.templates.keys())
-    for idx, key in enumerate(keys, start=1):
-        print(f"  [{idx}] {key}")
-    while True:
-        raw = input(f"Pick a template [1-{len(keys)}]: ").strip()
-        try:
-            idx = int(raw) - 1
-            if 0 <= idx < len(keys):
-                template_key = keys[idx]
-                break
-        except ValueError:
-            pass
-        print(f"  invalid choice '{raw}'.")
 
-    picks = _pick_within_template(registry.templates[template_key])
-    if picks is None:
+def cmd_register_llm(_args: argparse.Namespace) -> int:
+    from rag.registry.wizard import register_llm_template_flow
+
+    register_llm_template_flow()
+    return 0
+
+
+def cmd_save_mother(_args: argparse.Namespace) -> int:
+    """Interactive: assemble and save a mother instance (delegates to the picker flow)."""
+    from rag.registry.picker import _build_mother_flow
+
+    mother = _build_mother_flow()
+    if mother is None:
         print("Cancelled.")
         return 0
-    tokenizer_id, provider_id, metric_override, reranker_id = picks
-    save_instance_flow(
-        template_key=template_key,
-        tokenizer_id=tokenizer_id,
-        provider_id=provider_id,
-        metric_override=metric_override,
-        reranker_id=reranker_id,
-    )
+    print(f"\nAssembled: {mother.describe()}")
     return 0
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
     registry = load_registry()
-    if args.template_key not in registry.templates:
-        print(f"Template '{args.template_key}' not found.")
+    if args.template_key in registry.embedding_templates:
+        report = validate_full_embedding_template(
+            registry.embedding_templates[args.template_key]
+        )
+    elif args.template_key in registry.reranker_templates:
+        report = validate_full_reranker_template(
+            registry.reranker_templates[args.template_key]
+        )
+    elif args.template_key in registry.llm_templates:
+        report = validate_full_llm_template(registry.llm_templates[args.template_key])
+    else:
+        print(f"Template '{args.template_key}' not found in any catalogue.")
         return 1
-    template = registry.templates[args.template_key]
-    report = validate_full_template(template)
     save_registry(registry)
     for c in report.checks:
         marker = "OK" if c.ok else "FAIL"
@@ -109,20 +150,42 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_refresh(_args: argparse.Namespace) -> int:
     registry = load_registry()
-    if not registry.templates:
+    any_fail = False
+    any_template = False
+
+    for tk, t in registry.embedding_templates.items():
+        any_template = True
+        print(f"\nRefreshing embedding template '{tk}' ...")
+        report = validate_full_embedding_template(t)
+        _print_report(report)
+        any_fail = any_fail or not report.ok
+
+    for tk, t in registry.reranker_templates.items():
+        any_template = True
+        print(f"\nRefreshing reranker template '{tk}' ...")
+        report = validate_full_reranker_template(t)
+        _print_report(report)
+        any_fail = any_fail or not report.ok
+
+    for tk, t in registry.llm_templates.items():
+        any_template = True
+        print(f"\nRefreshing LLM template '{tk}' ...")
+        report = validate_full_llm_template(t)
+        _print_report(report)
+        any_fail = any_fail or not report.ok
+
+    if not any_template:
         print("No templates to refresh.")
         return 0
-    any_fail = False
-    for tk, t in registry.templates.items():
-        print(f"\nRefreshing template '{tk}' ...")
-        report = validate_full_template(t)
-        for c in report.checks:
-            marker = "OK" if c.ok else "FAIL"
-            print(f"  [{marker}] {c.name}: {c.detail}")
-        if not report.ok:
-            any_fail = True
+
     save_registry(registry)
     return 0 if not any_fail else 2
+
+
+def _print_report(report) -> None:
+    for c in report.checks:
+        marker = "OK" if c.ok else "FAIL"
+        print(f"  [{marker}] {c.name}: {c.detail}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,14 +199,20 @@ def build_parser() -> argparse.ArgumentParser:
         func=cmd_list
     )
     subs.add_parser(
-        "register-template", help="Interactively register a new template"
+        "register-template", help="Interactively register a new embedding template"
     ).set_defaults(func=cmd_register_template)
     subs.add_parser(
-        "save-instance", help="Interactively save a named instance from a template"
-    ).set_defaults(func=cmd_save_instance)
+        "register-reranker", help="Interactively register a new reranker template"
+    ).set_defaults(func=cmd_register_reranker)
+    subs.add_parser(
+        "register-llm", help="Interactively register a new LLM template"
+    ).set_defaults(func=cmd_register_llm)
+    subs.add_parser(
+        "save-mother", help="Interactively assemble and save a mother instance"
+    ).set_defaults(func=cmd_save_mother)
 
     p_validate = subs.add_parser(
-        "validate", help="Re-validate every tokenizer/provider in one template"
+        "validate", help="Re-validate every entry in one template (any kind)"
     )
     p_validate.add_argument("template_key", type=str)
     p_validate.set_defaults(func=cmd_validate)

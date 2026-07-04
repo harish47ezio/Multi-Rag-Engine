@@ -10,7 +10,7 @@ from common.paths import (
     VECTORS_FILENAME,
     doc_storage_dir,
 )
-from rag.factory.instance import Instance
+from rag.factory.instance import EmbeddingInstance
 from rag.search.ann.ann import ANNSearcher
 from rag.search.ann.annoy import AnnoySearcher
 from rag.search.ann.ivf import IVFSearcher
@@ -18,8 +18,8 @@ from rag.search.ann.lsh import LSHSearcher
 from rag.search.knn.knn_searcher import KNNSearcher
 
 
-def embed_query(instance: Instance, query: str):
-    """Embed a query through the chosen Instance and return a single vector."""
+def embed_query(instance: EmbeddingInstance, query: str):
+    """Embed a query through the chosen embedding instance and return a single vector."""
     return instance.embed([query])[0]
 
 
@@ -28,7 +28,7 @@ def run_search(
     query_vector,
     query: str,
     fingerprint: str,
-    instance: Instance,
+    instance: EmbeddingInstance,
     k: int = 5
 
 ):

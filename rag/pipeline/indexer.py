@@ -13,7 +13,7 @@ from common.paths import (
     VECTORS_FILENAME,
     doc_storage_dir,
 )
-from rag.factory.instance import Instance
+from rag.factory.instance import EmbeddingInstance
 from rag.pipeline.models import Chunk
 from rag.search.ann.ann import ANNSearcher
 from rag.search.ann.annoy import AnnoySearcher
@@ -23,7 +23,7 @@ from rag.search.ann.lsh import LSHSearcher
 logger = logging.getLogger(__name__)
 
 
-def index(chunks: List[Chunk], instance: Instance) -> None:
+def index(chunks: List[Chunk], instance: EmbeddingInstance) -> None:
     """
     1. Embed all chunks via `instance.embed`
     2. Build each searcher index using `instance.metric` and save to disk

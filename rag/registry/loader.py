@@ -17,17 +17,24 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import yaml
 
 from rag.registry.schema import (
+    KNOWN_SEARCH_STRATEGIES,
+    EmbeddingInstanceSpec,
+    EmbeddingTemplate,
+    LLMInstanceSpec,
+    LLMTemplate,
+    MotherInstanceSpec,
     ProviderSpec,
     Registry,
+    RerankerInstanceSpec,
     RerankerSpec,
-    SavedInstance,
+    RerankerTemplate,
+    SearchInstanceSpec,
     Status,
-    Template,
     TokenizerSpec,
 )
 
@@ -39,15 +46,15 @@ REGISTRY_PATH = Path(os.environ.get("MULTI_RAG_REGISTRY", "registry.yaml"))
 def load_registry(path: Path = REGISTRY_PATH) -> Registry:
     if not path.exists():
         logger.info("load_registry no file at path=%s (returning empty)", path)
-        return Registry(schema_version=1)
+        return Registry(schema_version=2)
 
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(raw) or {}
-    schema_version = int(data.get("schema_version", 1))
+    schema_version = int(data.get("schema_version", 2))
 
-    templates: Dict[str, Template] = {}
-    for model_key, t in (data.get("templates") or {}).items():
-        templates[model_key] = Template(
+    embedding_templates: Dict[str, EmbeddingTemplate] = {}
+    for model_key, t in (data.get("embedding_templates") or {}).items():
+        embedding_templates[model_key] = EmbeddingTemplate(
             model_key=model_key,
             metric=str(t.get("metric", "cosine")),
             dimension=t.get("dimension"),
@@ -63,60 +70,111 @@ def load_registry(path: Path = REGISTRY_PATH) -> Registry:
                 for tid, spec in (t.get("tokenizers") or {}).items()
             },
             providers={
-                pid: ProviderSpec(
-                    id=pid,
-                    kind=str(spec.get("kind", "ollama")),
-                    model_id=str(spec.get("model_id", "")),
-                    default_base_url=spec.get("default_base_url"),
-                    requires_api_key=bool(spec.get("requires_api_key", False)),
-                    status=_status(spec.get("status")),
-                    last_checked_at=spec.get("last_checked_at"),
-                    detail=spec.get("detail"),
-                )
+                pid: _provider_from_dict(pid, spec)
                 for pid, spec in (t.get("providers") or {}).items()
-            },
-            rerankers={
-                rid: RerankerSpec(
-                    id=rid,
-                    kind=str(spec.get("kind", "ollama")),
-                    model_id=str(spec.get("model_id", "")),
-                    default_base_url=spec.get("default_base_url"),
-                    requires_api_key=bool(spec.get("requires_api_key", False)),
-                    score_strategy=spec.get("score_strategy"),
-                    status=_status(spec.get("status")),
-                    last_checked_at=spec.get("last_checked_at"),
-                    detail=spec.get("detail"),
-                )
-                for rid, spec in (t.get("rerankers") or {}).items()
             },
         )
 
-    instances: Dict[str, SavedInstance] = {}
-    for name, i in (data.get("instances") or {}).items():
-        instances[name] = SavedInstance(
+    reranker_templates: Dict[str, RerankerTemplate] = {}
+    for model_key, t in (data.get("reranker_templates") or {}).items():
+        reranker_templates[model_key] = RerankerTemplate(
+            model_key=model_key,
+            providers={
+                pid: _reranker_from_dict(pid, spec)
+                for pid, spec in (t.get("providers") or {}).items()
+            },
+        )
+
+    llm_templates: Dict[str, LLMTemplate] = {}
+    for model_key, t in (data.get("llm_templates") or {}).items():
+        llm_templates[model_key] = LLMTemplate(
+            model_key=model_key,
+            providers={
+                pid: _provider_from_dict(pid, spec)
+                for pid, spec in (t.get("providers") or {}).items()
+            },
+        )
+
+    search_strategies: List[str] = list(
+        data.get("search_strategies") or KNOWN_SEARCH_STRATEGIES
+    )
+
+    embedding_instances: Dict[str, EmbeddingInstanceSpec] = {}
+    for name, i in (data.get("embedding_instances") or {}).items():
+        embedding_instances[name] = EmbeddingInstanceSpec(
             name=name,
             template_key=str(i["template_key"]),
             tokenizer_id=str(i["tokenizer_id"]),
             provider_id=str(i["provider_id"]),
             metric_override=i.get("metric_override"),
-            reranker_id=i.get("reranker_id"),
+            created_at=i.get("created_at"),
+        )
+
+    reranker_instances: Dict[str, RerankerInstanceSpec] = {}
+    for name, i in (data.get("reranker_instances") or {}).items():
+        reranker_instances[name] = RerankerInstanceSpec(
+            name=name,
+            template_key=str(i["template_key"]),
+            provider_id=str(i["provider_id"]),
+            created_at=i.get("created_at"),
+        )
+
+    llm_instances: Dict[str, LLMInstanceSpec] = {}
+    for name, i in (data.get("llm_instances") or {}).items():
+        llm_instances[name] = LLMInstanceSpec(
+            name=name,
+            template_key=str(i["template_key"]),
+            provider_id=str(i["provider_id"]),
+            created_at=i.get("created_at"),
+        )
+
+    search_instances: Dict[str, SearchInstanceSpec] = {}
+    for name, i in (data.get("search_instances") or {}).items():
+        search_instances[name] = SearchInstanceSpec(
+            name=name,
+            strategies=list(i.get("strategies") or []),
+            created_at=i.get("created_at"),
+        )
+
+    mother_instances: Dict[str, MotherInstanceSpec] = {}
+    for name, i in (data.get("mother_instances") or {}).items():
+        mother_instances[name] = MotherInstanceSpec(
+            name=name,
+            embedding_instance=str(i["embedding_instance"]),
+            search_instance=str(i["search_instance"]),
+            reranker_instance=i.get("reranker_instance"),
+            llm_instance=i.get("llm_instance"),
             created_at=i.get("created_at"),
         )
 
     logger.info(
-        "load_registry loaded path=%s templates=%d instances=%d",
+        "load_registry loaded path=%s embedding_templates=%d reranker_templates=%d "
+        "llm_templates=%d mother_instances=%d",
         path,
-        len(templates),
-        len(instances),
+        len(embedding_templates),
+        len(reranker_templates),
+        len(llm_templates),
+        len(mother_instances),
     )
-    return Registry(schema_version=schema_version, templates=templates, instances=instances)
+    return Registry(
+        schema_version=schema_version,
+        embedding_templates=embedding_templates,
+        reranker_templates=reranker_templates,
+        llm_templates=llm_templates,
+        search_strategies=search_strategies,
+        embedding_instances=embedding_instances,
+        reranker_instances=reranker_instances,
+        llm_instances=llm_instances,
+        search_instances=search_instances,
+        mother_instances=mother_instances,
+    )
 
 
 def save_registry(registry: Registry, path: Path = REGISTRY_PATH) -> None:
     """Serialize to YAML atomically (write-temp + rename)."""
     payload: Dict[str, Any] = {
         "schema_version": registry.schema_version,
-        "templates": {
+        "embedding_templates": {
             tk: {
                 "metric": t.metric,
                 "dimension": t.dimension,
@@ -126,22 +184,68 @@ def save_registry(registry: Registry, path: Path = REGISTRY_PATH) -> None:
                 "providers": {
                     pid: _provider_to_dict(s) for pid, s in t.providers.items()
                 },
-                "rerankers": {
-                    rid: _reranker_to_dict(s) for rid, s in t.rerankers.items()
+            }
+            for tk, t in registry.embedding_templates.items()
+        },
+        "reranker_templates": {
+            tk: {
+                "providers": {
+                    pid: _reranker_to_dict(s) for pid, s in t.providers.items()
                 },
             }
-            for tk, t in registry.templates.items()
+            for tk, t in registry.reranker_templates.items()
         },
-        "instances": {
+        "llm_templates": {
+            tk: {
+                "providers": {
+                    pid: _provider_to_dict(s) for pid, s in t.providers.items()
+                },
+            }
+            for tk, t in registry.llm_templates.items()
+        },
+        "search_strategies": list(registry.search_strategies),
+        "embedding_instances": {
             name: {
                 "template_key": i.template_key,
                 "tokenizer_id": i.tokenizer_id,
                 "provider_id": i.provider_id,
                 "metric_override": i.metric_override,
-                "reranker_id": i.reranker_id,
                 "created_at": i.created_at,
             }
-            for name, i in registry.instances.items()
+            for name, i in registry.embedding_instances.items()
+        },
+        "reranker_instances": {
+            name: {
+                "template_key": i.template_key,
+                "provider_id": i.provider_id,
+                "created_at": i.created_at,
+            }
+            for name, i in registry.reranker_instances.items()
+        },
+        "llm_instances": {
+            name: {
+                "template_key": i.template_key,
+                "provider_id": i.provider_id,
+                "created_at": i.created_at,
+            }
+            for name, i in registry.llm_instances.items()
+        },
+        "search_instances": {
+            name: {
+                "strategies": list(i.strategies),
+                "created_at": i.created_at,
+            }
+            for name, i in registry.search_instances.items()
+        },
+        "mother_instances": {
+            name: {
+                "embedding_instance": i.embedding_instance,
+                "search_instance": i.search_instance,
+                "reranker_instance": i.reranker_instance,
+                "llm_instance": i.llm_instance,
+                "created_at": i.created_at,
+            }
+            for name, i in registry.mother_instances.items()
         },
     }
 
@@ -167,6 +271,33 @@ def _status(raw: Any) -> Status:
         return Status(str(raw)) if raw is not None else Status.NOT_VALIDATED
     except ValueError:
         return Status.NOT_VALIDATED
+
+
+def _provider_from_dict(pid: str, spec: Dict[str, Any]) -> ProviderSpec:
+    return ProviderSpec(
+        id=pid,
+        kind=str(spec.get("kind", "ollama")),
+        model_id=str(spec.get("model_id", "")),
+        default_base_url=spec.get("default_base_url"),
+        requires_api_key=bool(spec.get("requires_api_key", False)),
+        status=_status(spec.get("status")),
+        last_checked_at=spec.get("last_checked_at"),
+        detail=spec.get("detail"),
+    )
+
+
+def _reranker_from_dict(pid: str, spec: Dict[str, Any]) -> RerankerSpec:
+    return RerankerSpec(
+        id=pid,
+        kind=str(spec.get("kind", "ollama")),
+        model_id=str(spec.get("model_id", "")),
+        default_base_url=spec.get("default_base_url"),
+        requires_api_key=bool(spec.get("requires_api_key", False)),
+        score_strategy=spec.get("score_strategy"),
+        status=_status(spec.get("status")),
+        last_checked_at=spec.get("last_checked_at"),
+        detail=spec.get("detail"),
+    )
 
 
 def _tokenizer_to_dict(s: TokenizerSpec) -> Dict[str, Any]:

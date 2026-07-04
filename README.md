@@ -112,7 +112,12 @@ Same document store, same harness, same I/O — different brain.
   token counting (chunker concern) is `BaseTokenizer`. They live in separate packages
   (`rag/embedder/` and `rag/tokenizer/`) because the same model can be served by N
   providers with no tokenizer change, and a single provider can serve N models with N
-  different tokenizers. The `Instance` (built by `rag/factory/`) composes one of each.
+  different tokenizers. The `EmbeddingInstance` (built by `rag/factory/`) composes one of each.
+- **Four building blocks, one mother instance.** Embedding, search, reranker, and LLM are
+  four *independent* registry building blocks — each with its own template (what's
+  available) and named instance (a locked pick). A `MotherInstance` ties one of each
+  together (reranker + LLM optional) and is the single object the pipeline runs on. You
+  pick a mother instance at startup; everything downstream flows from it.
 - **Metric is behaviour, not data.** Each ANN backend (hnswlib, FAISS, Annoy) speaks its
   own metric vocabulary. The `MetricKind` enum is the conceptual identity; each searcher
   owns its own mapping from `MetricKind` → backend constant. Mismatches throw
@@ -145,8 +150,10 @@ backend — it just calls `search(query_vector, query_text, top_k)`.
 
 ## Runtime pipeline
 
-`parse → chunk → index → search → report` — every stage is keyed by the document's
-SHA-256 fingerprint, so reruns are cache-hits and per-document artifacts never collide.
+`parse → chunk → index → search → rerank → synthesize → report` — every stage is keyed by
+the document's SHA-256 fingerprint, so reruns are cache-hits and per-document artifacts
+never collide. `rerank` and `synthesize` are no-ops when the mother instance carries no
+reranker / LLM.
 
 ### Document fingerprinting
 
@@ -160,15 +167,23 @@ once by the parser (`fingerprint/hash.py`) and threaded through every downstream
   persists chunks to SQLite keyed by `(fingerprint, model_key, chunk_index)`.
   Different embedding models produce different token boundaries, so chunks are
   scoped per model. Re-running with the same model returns the cached chunks.
-- `index(chunks, instance)` → writes embeddings and every searcher index to
+- `index(chunks, embedding)` → writes embeddings and every searcher index to
   `storage/<fingerprint>/<model_key>/`. Per-searcher files are skipped if already
-  present. The metric used for every searcher comes from `instance.metric` —
-  never hard-coded.
-- `search(...)` → loads the per-(fingerprint, model_key) index, returns
-  `(chunk_index, score)`.
-- `write_results_md(query, fingerprint, model_key, runs, top_k)` → hydrates
-  `chunk_index`es back to full text + page ranges via the SQLite store, writes
-  `result/<fingerprint>_<model_key>_<timestamp>.md`.
+  present. The metric used for every searcher comes from `embedding.metric` —
+  never hard-coded. (`embedding` is the mother instance's `EmbeddingInstance`.)
+- `run_search(name, ...)` → loads the per-(fingerprint, model_key) index for one
+  searcher and returns `(elapsed, [(chunk_index, score), ...])`. Only the strategies
+  listed in the mother's search instance run.
+- `rerank_results(name, results, query, fingerprint, embedding, reranker, top_n)` →
+  hydrates chunk text and replaces a searcher's bi-encoder ordering with the
+  cross-encoder reranker's. No-op (returns results unchanged) when `reranker` is None.
+- `synthesize_answer(results, query, fingerprint, embedding, llm, top_n?)` → stitches the
+  top results' text into a grounded prompt and asks the LLM to answer. Returns the
+  `LLMResponse`, or None when `llm` is None.
+- `write_results_md(query, fingerprint, model_key, runs, top_k, reranker_label?, llm_answer?)`
+  → hydrates `chunk_index`es back to full text + page ranges via the SQLite store, writes
+  `result/<fingerprint>_<model_key>_<timestamp>.md`. When `llm_answer` is present it is
+  rendered as an `## LLM Answer` section at the top.
 
 Net effect: change the document or the model → everything re-runs. Don't change
 either → every stage is an O(1) cache hit.
@@ -176,7 +191,7 @@ either → every stage is an O(1) cache hit.
 ### Chunking strategy
 
 Token-aware, paragraph- and sentence-aware. Sizing is in **tokens** (using the
-tokenizer attached to the active `Instance` via `instance.count_tokens`), not characters.
+tokenizer attached to the active `EmbeddingInstance` via `embedding.count_tokens`), not characters.
 
 Primary split — ladder, prefer larger semantic units:
 
@@ -221,14 +236,16 @@ Read APIs (`rag/pipeline/store.py`):
 
 ### Per-query reports
 
-`rag/pipeline/report.write_results_md(query, fingerprint, model_key, runs, top_k)`
+`rag/pipeline/report.write_results_md(query, fingerprint, model_key, runs, top_k, reranker_label?, llm_answer?)`
 writes `result/<fingerprint>_<model_key>_<timestamp>.md` containing:
 
 - Header (query, fingerprint, top-k, timestamp).
+- Optional `## LLM Answer` section (when `llm_answer` is passed).
 - Summary table: searcher → elapsed seconds.
-- Per-searcher section: each ranked hit shows `chunk_index`, score, page range,
-  source path, and the **raw** snippet sliced out of `output/<fingerprint>.md`
-  (preserving paragraphs and dialogue line breaks — not the flattened chunk text).
+- Per-searcher section: each ranked hit shows `chunk_index`, score (annotated as
+  cross-encoder score when `reranker_label` is set), page range, source path, and the
+  **raw** snippet sliced out of `output/<fingerprint>.md` (preserving paragraphs and
+  dialogue line breaks — not the flattened chunk text).
 
 This is the harness's evaluation surface: same document, same query, every searcher
 side by side, one diff away from each other.
@@ -246,7 +263,7 @@ Multi RAG Engine/
 │   └── hash.py                   # sha256(file) → document identity
 ├── output/                       # parser writes output/<fingerprint>.md
 ├── result/                       # per-query markdown reports
-├── registry.yaml                 # Embedder templates + saved instances (curated)
+├── registry.yaml                 # v2: embedding/reranker/llm templates + named instances + mother instances
 ├── storage/                      # SQLite + per-(fingerprint, model_key) index binaries (gitignored)
 │   ├── chunks.db                 # SQLite chunk store
 │   └── <fingerprint>/<model_key>/  # vectors.npy + index_{hnsw,annoy,ivf,lsh}
@@ -263,16 +280,16 @@ Multi RAG Engine/
     ├── tokenizer/                # Token counting — orthogonal to provider
     │   ├── base_tokenizer.py     # BaseTokenizer contract (count_tokens)
     │   └── hf_tokenizer.py       # HuggingFace tokenizers backend
-    ├── factory/                  # Compose tokenizer + embedder + metric into Instance
-    │   ├── factory.py            # EmbedderFactory (from_template / from_saved_instance / interactive_pick)
-    │   └── instance.py           # Locked runtime selection (model, tokenizer, provider, metric)
-    ├── registry/                 # Templates + named instances + CLI
-    │   ├── schema.py             # Template / TokenizerSpec / ProviderSpec / SavedInstance
-    │   ├── loader.py             # YAML load + atomic save
-    │   ├── validator.py          # validate_tokenizer / validate_provider
-    │   ├── picker.py             # interactive_pick()
-    │   ├── wizard.py             # register-template + save-instance flows
-    │   ├── cli.py                # list / register-template / save-instance / validate / refresh
+    ├── factory/                  # Build runtime instances from the registry
+    │   ├── factory.py            # EmbeddingFactory / RerankerFactory / LLMFactory / MotherFactory
+    │   └── instance.py           # EmbeddingInstance / RerankerInstance / LLMInstance / SearchInstance / MotherInstance
+    ├── registry/                 # Templates + named instances + mother instances + CLI
+    │   ├── schema.py             # EmbeddingTemplate / RerankerTemplate / LLMTemplate / *InstanceSpec / MotherInstanceSpec
+    │   ├── loader.py             # YAML load + atomic save (schema_version 2)
+    │   ├── validator.py          # validate_tokenizer / validate_provider / validate_reranker / per-category picks
+    │   ├── picker.py             # run_picker(): pick or assemble a mother instance
+    │   ├── wizard.py             # register-{embedding,reranker,llm}-template + save-{instance,mother} flows
+    │   ├── cli.py                # list / register-template / register-reranker / register-llm / save-mother / validate / refresh
     │   └── __main__.py           # python -m rag.registry CLI entrypoint
     ├── pipeline/
     │   ├── models.py             # Chunk, ChunkConfig dataclasses
@@ -280,6 +297,8 @@ Multi RAG Engine/
     │   ├── chunker.py            # token + paragraph + sentence ladder
     │   ├── store.py              # SQLite chunk store
     │   ├── indexer.py            # embed → build & persist all indices
+    │   ├── rerank.py             # rerank_results(): cross-encoder re-ordering of a searcher's top-k
+    │   ├── synthesize.py         # synthesize_answer(): grounded LLM answer over retrieved chunks
     │   └── report.py             # write_results_md(): per-query markdown report
     └── search/
         ├── base_search.py        # BaseSearcher contract
@@ -349,63 +368,83 @@ print(llm.is_available())
 print(llm.complete("Summarise transformers in one sentence.").text)
 ```
 
-### 4. Pick (or register) an embedder
+### 4. Pick (or assemble) a mother instance
 
-The embedder is a **Template + Instance** registry. A template lists a model's
-metric, dimension, valid tokenizers, and valid providers. An instance is one
-locked pick across those. Everything downstream — chunking, indexing, searching,
-storage — flows from the instance.
+The registry has four independent building blocks, each with a **template** (what's
+available) and a **named instance** (a locked pick):
 
-The repo ships `registry.yaml` with one seed template (`qwen3-embedding-8b` on
-`ollama-local`). Inspect and extend it via the CLI:
+| Block     | Template lists…                          | Instance locks…                         |
+| --------- | ---------------------------------------- | --------------------------------------- |
+| Embedding | model → metric, dimension, tokenizers, providers | one tokenizer + provider (+ metric override) |
+| Reranker  | reranker model → providers               | one provider                            |
+| LLM       | LLM model → providers                    | one provider                            |
+| Search    | catalogue of searcher strategies         | a subset of strategies to run           |
+
+A **mother instance** references one instance of each (reranker + LLM optional). It's the
+single object the pipeline runs on. The repo ships `registry.yaml` (schema v2) with seed
+templates and example instances (`default`, `full-stack`). Inspect and extend via the CLI:
 
 ```bash
-python -m rag.registry list                    # templates + saved instances
-python -m rag.registry register-template       # wizard: define a new template
-python -m rag.registry save-instance           # name a locked (template, tokenizer, provider) pick
-python -m rag.registry validate qwen3-embedding-8b
-python -m rag.registry refresh                 # re-check every entry
+python -m rag.registry list                    # every template + instance + mother instance
+python -m rag.registry register-template       # wizard: define a new embedding template
+python -m rag.registry register-reranker       # wizard: define a new reranker template
+python -m rag.registry register-llm            # wizard: define a new LLM template
+python -m rag.registry save-mother             # assemble + save a mother instance
+python -m rag.registry validate qwen3-embedding-8b   # re-check one template (any kind)
+python -m rag.registry refresh                 # re-check every template
 ```
 
-In code, three entrypoints:
+In code:
 
 ```python
-from rag.factory import EmbedderFactory
+from rag.factory import MotherFactory
 
-# Programmatic — pick a template explicitly:
-instance = EmbedderFactory.from_template(
+# Re-hydrate a saved mother instance (embedding + search + optional reranker + LLM):
+mother = MotherFactory.from_saved("default")
+
+# Interactive — pick or assemble one (used by every alpha_test.py):
+mother = MotherFactory.interactive_pick()
+
+embedding = mother.embedding      # EmbeddingInstance: embed / count_tokens / metric / model_key
+strategies = mother.search.strategies   # e.g. ["ANNSearcher", "KNNSearcher"]
+reranker = mother.reranker        # RerankerInstance or None
+llm = mother.llm                  # LLMInstance or None
+```
+
+Each building block also has its own factory (`EmbeddingFactory`, `RerankerFactory`,
+`LLMFactory`) with `from_template(...)` / `from_saved_instance(name)` when you want just
+one piece:
+
+```python
+from rag.factory import EmbeddingFactory
+
+embedding = EmbeddingFactory.from_template(
     model_key="qwen3-embedding-8b",
     tokenizer_id="hf-qwen3-8b",    # optional; defaults to first in template
     provider_id="ollama-local",    # optional; defaults to first in template
     # metric_override="dot",       # optional; logs a warning when used
 )
-
-# Programmatic — re-hydrate a previously-saved named instance:
-instance = EmbedderFactory.from_saved_instance("fast-qwen")
-
-# Interactive — show the menu (used by every alpha_test.py):
-instance = EmbedderFactory.interactive_pick()
 ```
 
 ### 5. Index a document
 
 ```python
-from rag.factory import EmbedderFactory
+from rag.factory import EmbeddingFactory
 from rag.pipeline.chunker import chunk
 from rag.pipeline.indexer import index
 from rag.pipeline.parser  import parse
 from rag.pipeline.store   import init_db
 
-instance = EmbedderFactory.from_template(
+embedding = EmbeddingFactory.from_template(
     model_key="qwen3-embedding-8b",
     provider_id="ollama-local",
 )
 
 init_db()                                                   # one-time: create chunks table
 fingerprint = parse("data/your_doc.pdf")                    # sha256(file); writes output/<fp>.md
-chunks      = chunk(fingerprint, instance.count_tokens,     # token-aware, persists to SQLite
-                   instance.model_key)
-index(chunks, instance)                                     # vectors.npy + HNSW + Annoy + IVF + LSH
+chunks      = chunk(fingerprint, embedding.count_tokens,    # token-aware, persists to SQLite
+                   embedding.model_key)
+index(chunks, embedding)                                    # vectors.npy + HNSW + Annoy + IVF + LSH
                                                             # → storage/<fingerprint>/<model_key>/
 ```
 
@@ -417,20 +456,21 @@ All three calls are cache-hits on the second run for the same (file, model).
 from rag.pipeline.store import get_multi_chunks
 from rag.search.ann.ann import ANNSearcher
 
-# Metric comes from the instance — no hardcoded CosineDistanceMetric() anywhere.
-searcher = ANNSearcher(metric=instance.metric)
-searcher.load(f"storage/{fingerprint}/{instance.model_key}/index_hnsw.bin")
+# Metric comes from the embedding instance — no hardcoded CosineDistanceMetric() anywhere.
+searcher = ANNSearcher(metric=embedding.metric)
+searcher.load(f"storage/{fingerprint}/{embedding.model_key}/index_hnsw.bin")
 
-q_vec  = instance.embed(["What is the architecture of a transformer?"])[0]
+q_vec  = embedding.embed(["What is the architecture of a transformer?"])[0]
 hits   = searcher.search(q_vec, "transformer architecture", top_k=5)   # [(chunk_index, score), ...]
-chunks = get_multi_chunks(fingerprint, instance.model_key, [idx for idx, _ in hits])
+chunks = get_multi_chunks(fingerprint, embedding.model_key, [idx for idx, _ in hits])
 
 for (idx, score), c in zip(hits, chunks):
     print(f"[{score:.3f}] pages {c.start_page}-{c.end_page}: {c.text[:120]}…")
 ```
 
-For a side-by-side report across every searcher, see `rag/pipeline/alpha_test.py` —
-it runs HNSW, IVF, LSH, Annoy and KNN on the same query and writes
+For the full harness, see `rag/pipeline/alpha_test.py` — it picks a mother instance,
+runs the selected subset of searchers on the same query, reranks (if a reranker is
+attached), synthesises an LLM answer (if an LLM is attached), and writes
 `result/<fingerprint>_<model_key>_<timestamp>.md` via `write_results_md(...)`.
 
 ---
@@ -444,9 +484,9 @@ fits together.
 | File                              | What it shows |
 | --------------------------------- | ------------- |
 | `llm/alpha_test.py`               | LLM harness — Ollama Cloud completion (needs `OLLAMA_API_KEY`). |
-| `rag/embedder/alpha_test.py`      | Embedder harness — embed a sentence, print the dimension. |
+| `rag/embedder/alpha_test.py`      | Embedder harness — pick a mother instance, embed a sentence, print the dimension. |
 | `rag/search/runner.py`            | Per-searcher loaders + `run_search()` helper used by the pipeline. |
-| `rag/pipeline/alpha_test.py`      | **Start here.** Full end-to-end: parse PDF → chunk → embed → build all indices → run HNSW / IVF / LSH / Annoy / KNN for one query → write `result/<fingerprint>_<timestamp>.md`. |
+| `rag/pipeline/alpha_test.py`      | **Start here.** Full end-to-end: pick a mother instance → parse PDF → chunk → embed → build all indices → run the selected searchers → rerank → synthesise LLM answer → write `result/<fingerprint>_<timestamp>.md`. |
 
 `rag/pipeline/alpha_test.py` is the most representative — it touches the parser,
 chunker, embedder, SQLite store, every searcher, and the report writer in one file.
@@ -465,8 +505,17 @@ so you get the same structured log line format across all four scripts.
 2. The wizard validates the tokenizer (HF repo loads?) and each provider
    (reachable? serves the model?). Failures are saved too — fix them later
    and re-run `python -m rag.registry validate <model_key>` to flip status.
-3. Use it from code via `EmbedderFactory.from_template(model_key="...")` or
-   pick it from the interactive menu.
+3. Use it from code via `EmbeddingFactory.from_template(model_key="...")`, or
+   assemble it into a mother instance from the interactive menu.
+
+### Add a reranker or LLM to the registry
+
+1. Run `python -m rag.registry register-reranker` (or `register-llm`) and answer
+   the prompts — a reranker/LLM template is a model with one or more providers.
+2. The wizard validates each provider the same way (reachable? serves the model?).
+3. Reference it by building a named reranker/LLM instance (via `save-mother` or the
+   "assemble a new mother instance" flow), then attach it to a mother instance so
+   the pipeline's rerank / synthesize stages activate.
 
 ### Add a new tokenizer kind (e.g. tiktoken, an API tokenizer)
 
@@ -523,8 +572,9 @@ The retriever code never changes.
 | LLM harness — Ollama (local + cloud)              |  Done |
 | LLM harness — OpenAI / Anthropic / Gemini / HF    |   IP  | *factory slot ready, adapter deferred* |
 | Embedder harness — Ollama                         |  Done |
-| Embedder registry (templates + named instances)   |  Done |
-| Embedder CLI (`python -m rag.registry ...`)       |  Done |
+| Registry — embedding / reranker / llm / search templates + instances | Done |
+| Mother instance (composes one of each, picked at startup) | Done |
+| Registry CLI (`python -m rag.registry ...`)       |  Done |
 | Document fingerprint (SHA-256, cache key)         |  Done |
 | Document parser — PDF (via `opendataloader-pdf`)  |  Done |
 | Document parser — TXT / MD                        |   IP  | *fingerprint computed, intermediate markdown not yet written* |
@@ -534,7 +584,9 @@ The retriever code never changes.
 | Per-(fingerprint, model_key) storage scoping      |  Done |
 | Searchers — BM25, KNN, HNSW, Annoy, IVF, LSH      |  Done |
 | Distance metrics — Cosine, Dot, Euclidean         |  Done |
-| Per-query markdown report writer                  |  Done |
+| Cross-encoder reranker stage (Ollama + HF)        |  Done |
+| LLM answer synthesis over retrieved chunks        |  Done |
+| Per-query markdown report writer (+ LLM answer)   |  Done |
 | Centralised logging (`common/log_utils.py`)       |  Done |
 | Mode `iterative` — two-pass retriever             |   IP  | *primitives Done, orchestration in progress* |
 | Web-scrape fallback (no-doc mode)                 |   FS  |

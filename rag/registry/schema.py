@@ -1,27 +1,43 @@
 """
 Dataclasses backing the YAML registry.
 
-Two top-level concepts:
+The registry models four independent building blocks, each with its own
+two-layer template/instance split, plus a composite that ties one of
+each together:
 
-* `Template` — a model definition with N tokenizer entries and N provider
-  entries. The metric and dimension are fixed properties of the model;
-  the tokenizer and provider lists are alternatives the user is free to
-  pick between. Each entry carries its own `status` and `last_checked_at`
-  so the wizard can save partially-broken templates and have the user
-  fix them later.
+* Embedding — `EmbeddingTemplate` (a model's fixed metric + dimension
+  plus alternative tokenizers and providers) and `EmbeddingInstanceSpec`
+  (a locked tokenizer + provider + optional metric override).
 
-* `SavedInstance` — a named, locked pick (template + one tokenizer + one
-  provider + optional metric override). Instances are how the pipeline
-  is actually parameterised at runtime; templates only describe what
-  picks are *available*.
+* Reranker — `RerankerTemplate` (a reranker model with alternative
+  providers) and `RerankerInstanceSpec` (a locked provider).
 
-The registry file holds both in one document under separate top-level
-keys: `templates:` and `instances:`.
+* LLM — `LLMTemplate` (an LLM model with alternative providers) and
+  `LLMInstanceSpec` (a locked provider).
+
+* Search — a static catalogue of searcher class names (`search_strategies`)
+  and `SearchInstanceSpec` (a chosen subset to run).
+
+* `MotherInstanceSpec` — the top-level pick: one embedding instance, one
+  search instance, and optionally one reranker instance and one LLM
+  instance. This is what the pipeline is parameterised by at runtime.
+
+The registry file holds every catalogue and every named pick in one
+document under separate top-level keys.
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+
+KNOWN_SEARCH_STRATEGIES: List[str] = [
+    "ANNSearcher",
+    "IVFSearcher",
+    "LSHSearcher",
+    "AnnoySearcher",
+    "KNNSearcher",
+]
 
 
 class Status(str, Enum):
@@ -66,7 +82,7 @@ class ProviderSpec:
 @dataclass
 class RerankerSpec:
     """
-    Optional cross-encoder reranker attached to a template.
+    A cross-encoder reranker provider.
 
     Mirrors `ProviderSpec` because rerankers, like embedders, are a
     `(transport, model_id)` pair — the kind discriminates between
@@ -87,28 +103,90 @@ class RerankerSpec:
 
 
 @dataclass
-class Template:
+class EmbeddingTemplate:
     model_key: str
     metric: str
     dimension: Optional[int] = None
     tokenizers: Dict[str, TokenizerSpec] = field(default_factory=dict)
     providers: Dict[str, ProviderSpec] = field(default_factory=dict)
-    rerankers: Dict[str, RerankerSpec] = field(default_factory=dict)
 
 
 @dataclass
-class SavedInstance:
+class RerankerTemplate:
+    """A reranker model with alternative providers to serve it."""
+
+    model_key: str
+    providers: Dict[str, RerankerSpec] = field(default_factory=dict)
+
+
+@dataclass
+class LLMTemplate:
+    """An LLM model with alternative providers to serve it."""
+
+    model_key: str
+    providers: Dict[str, ProviderSpec] = field(default_factory=dict)
+
+
+@dataclass
+class EmbeddingInstanceSpec:
     name: str
     template_key: str
     tokenizer_id: str
     provider_id: str
     metric_override: Optional[str] = None
-    reranker_id: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
+class RerankerInstanceSpec:
+    name: str
+    template_key: str
+    provider_id: str
+    created_at: Optional[str] = None
+
+
+@dataclass
+class LLMInstanceSpec:
+    name: str
+    template_key: str
+    provider_id: str
+    created_at: Optional[str] = None
+
+
+@dataclass
+class SearchInstanceSpec:
+    name: str
+    strategies: List[str] = field(default_factory=list)
+    created_at: Optional[str] = None
+
+
+@dataclass
+class MotherInstanceSpec:
+    """
+    The top-level pick. References one sub-instance of each kind by name.
+    `reranker_instance` and `llm_instance` are optional — a mother
+    instance can run embedding + search alone.
+    """
+
+    name: str
+    embedding_instance: str
+    search_instance: str
+    reranker_instance: Optional[str] = None
+    llm_instance: Optional[str] = None
     created_at: Optional[str] = None
 
 
 @dataclass
 class Registry:
-    schema_version: int = 1
-    templates: Dict[str, Template] = field(default_factory=dict)
-    instances: Dict[str, SavedInstance] = field(default_factory=dict)
+    schema_version: int = 2
+    embedding_templates: Dict[str, EmbeddingTemplate] = field(default_factory=dict)
+    reranker_templates: Dict[str, RerankerTemplate] = field(default_factory=dict)
+    llm_templates: Dict[str, LLMTemplate] = field(default_factory=dict)
+    search_strategies: List[str] = field(
+        default_factory=lambda: list(KNOWN_SEARCH_STRATEGIES)
+    )
+    embedding_instances: Dict[str, EmbeddingInstanceSpec] = field(default_factory=dict)
+    reranker_instances: Dict[str, RerankerInstanceSpec] = field(default_factory=dict)
+    llm_instances: Dict[str, LLMInstanceSpec] = field(default_factory=dict)
+    search_instances: Dict[str, SearchInstanceSpec] = field(default_factory=dict)
+    mother_instances: Dict[str, MotherInstanceSpec] = field(default_factory=dict)

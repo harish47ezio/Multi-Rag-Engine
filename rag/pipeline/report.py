@@ -32,6 +32,7 @@ def write_results_md(
     runs: Sequence[Run],
     top_k: int,
     reranker_label: Optional[str] = None,
+    llm_answer: Optional[str] = None,
 ) -> Path:
     """
     Write a markdown report for one query across multiple searchers.
@@ -47,6 +48,9 @@ def write_results_md(
                          present, the report annotates the header and the
                          per-result score column as cross-encoder scores
                          instead of bi-encoder similarities.
+        llm_answer     : optional synthesised LLM answer. When present, it is
+                         rendered as an `## LLM Answer` section at the top of
+                         the report, right after the header block.
 
     Returns:
         Path to the written markdown file.
@@ -87,6 +91,11 @@ def write_results_md(
     lines.append(f"**Top-k:** {top_k}")
     lines.append(f"**Generated:** {timestamp}")
     lines.append("")
+    if llm_answer and llm_answer.strip():
+        lines.append("## LLM Answer")
+        lines.append("")
+        lines.append(llm_answer.strip())
+        lines.append("")
     lines.append("## Summary")
     lines.append("")
     lines.append("| Searcher | Elapsed |")

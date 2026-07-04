@@ -80,6 +80,7 @@ class OllamaClient(BaseHTTPClient):
             **kwargs,
         }
         start = time.perf_counter()
+        logger.info("headers=%s", self._headers())
         resp = requests.post(url, json=payload, headers=self._headers(), timeout=120)
         elapsed = time.perf_counter() - start
         resp.raise_for_status()

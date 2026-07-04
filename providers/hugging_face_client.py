@@ -29,11 +29,22 @@ class HuggingFaceClient(BaseHTTPClient):
         )
 
     def is_available(self) -> bool:
+        """Reachability probe.
+
+        The endpoint is a POST-only, OpenAI-style embeddings route, so a GET
+        will not return 200 even when the host is perfectly healthy. We only
+        treat genuine transport failures (no connection, timeout) as
+        unreachable; any HTTP response — including 401/404/405 — means the
+        host is up and is considered available.
+        """
         try:
-            response = requests.get(self.base_url, headers=self._headers(), timeout=10)
-            return response.status_code == 200
+            requests.get(self.base_url, headers=self._headers(), timeout=10)
+            return True
+        except (requests.ConnectionError, requests.Timeout) as e:
+            logger.info("is_available unreachable err=%s", e)
+            return False
         except Exception as e:
-            logger.info("is_available failed err=%s", e)
+            logger.info("is_available unexpected err=%s", e)
             return False
 
     def embed(self, model: str, texts: List[str]) -> List[List[float]]:

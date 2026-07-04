@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 llm = LLMFactory.create({
     "provider": "ollama",
-    "model": "qwen3-next:80b",
+    "model": "qwen3-coder:480b",
     "base_url": "https://ollama.com",
 })
 

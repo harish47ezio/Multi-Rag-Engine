@@ -31,10 +31,12 @@ from typing import List, Optional, Union
 from providers.ollama_client import OllamaClient
 from providers.hugging_face_client import HuggingFaceClient
 from rag.registry.schema import (
+    EmbeddingTemplate,
+    LLMTemplate,
     ProviderSpec,
     RerankerSpec,
+    RerankerTemplate,
     Status,
-    Template,
     TokenizerSpec,
 )
 from rag.tokenizer.hf_tokenizer import HFTokenizer
@@ -255,14 +257,13 @@ def update_status_from_check(
     spec.last_checked_at = now_iso()
 
 
-def validate_template_picks(
-    template: Template,
+def validate_embedding_picks(
+    template: EmbeddingTemplate,
     tokenizer_id: str,
     provider_id: str,
-    reranker_id: Optional[str] = None,
 ) -> ValidationReport:
     """
-    Run the lazy-validation flow used by `EmbedderFactory.from_template`.
+    Lazy-validation flow used by `EmbeddingFactory.from_template`.
 
     Side effect: mutates the `status` / `detail` / `last_checked_at`
     fields of the matched specs on `template` so the caller can persist
@@ -294,24 +295,51 @@ def validate_template_picks(
         update_status_from_check(prov, check)
         report.checks.append(check)
 
-    if reranker_id is not None:
-        rr = template.rerankers.get(reranker_id)
-        if rr is None:
-            report.add(
-                f"reranker:{reranker_id}",
-                False,
-                f"not present in template '{template.model_key}'",
-            )
-        else:
-            check = validate_reranker(rr)
-            update_status_from_check(rr, check)
-            report.checks.append(check)
-
     return report
 
 
-def validate_full_template(template: Template) -> ValidationReport:
-    """Run every tokenizer + provider + reranker in the template; mutates statuses."""
+def validate_reranker_pick(
+    template: RerankerTemplate,
+    provider_id: str,
+) -> ValidationReport:
+    """Validate one reranker provider; mutates its status in place."""
+    report = ValidationReport()
+    prov = template.providers.get(provider_id)
+    if prov is None:
+        report.add(
+            f"reranker:{provider_id}",
+            False,
+            f"not present in reranker template '{template.model_key}'",
+        )
+    else:
+        check = validate_reranker(prov)
+        update_status_from_check(prov, check)
+        report.checks.append(check)
+    return report
+
+
+def validate_llm_pick(
+    template: LLMTemplate,
+    provider_id: str,
+) -> ValidationReport:
+    """Validate one LLM provider (reachability + model-served); mutates status."""
+    report = ValidationReport()
+    prov = template.providers.get(provider_id)
+    if prov is None:
+        report.add(
+            f"provider:{provider_id}",
+            False,
+            f"not present in LLM template '{template.model_key}'",
+        )
+    else:
+        check = validate_provider(prov)
+        update_status_from_check(prov, check)
+        report.checks.append(check)
+    return report
+
+
+def validate_full_embedding_template(template: EmbeddingTemplate) -> ValidationReport:
+    """Run every tokenizer + provider in one embedding template; mutates statuses."""
     report = ValidationReport()
     for tok in template.tokenizers.values():
         check = validate_tokenizer(tok)
@@ -321,8 +349,24 @@ def validate_full_template(template: Template) -> ValidationReport:
         check = validate_provider(prov)
         update_status_from_check(prov, check)
         report.checks.append(check)
-    for rr in template.rerankers.values():
-        check = validate_reranker(rr)
-        update_status_from_check(rr, check)
+    return report
+
+
+def validate_full_reranker_template(template: RerankerTemplate) -> ValidationReport:
+    """Run every provider in one reranker template; mutates statuses."""
+    report = ValidationReport()
+    for prov in template.providers.values():
+        check = validate_reranker(prov)
+        update_status_from_check(prov, check)
+        report.checks.append(check)
+    return report
+
+
+def validate_full_llm_template(template: LLMTemplate) -> ValidationReport:
+    """Run every provider in one LLM template; mutates statuses."""
+    report = ValidationReport()
+    for prov in template.providers.values():
+        check = validate_provider(prov)
+        update_status_from_check(prov, check)
         report.checks.append(check)
     return report
